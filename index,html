@@ -152,6 +152,15 @@ scene.fogMode = BABYLON.Scene.FOGMODE_EXP2;
 scene.fogDensity = 0.016;
 scene.fogColor = new BABYLON.Color3(0.92, 0.82, 0.63);
 
+/* PBR-окружение (тот же CDN, что и babylon.js) + ACES-тонмаппинг */
+scene.environmentTexture = BABYLON.CubeTexture.CreateFromPrefilteredData(
+  'https://assets.babylonjs.com/environments/environmentSpecular.env', scene);
+scene.environmentIntensity = .55;
+scene.imageProcessingConfiguration.toneMappingEnabled = true;
+scene.imageProcessingConfiguration.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+scene.imageProcessingConfiguration.exposure = 1.1;
+scene.imageProcessingConfiguration.contrast = 1.04;
+
 const V3 = (x,y,z)=>new BABYLON.Vector3(x,y,z);
 const DOWN = V3(0,-1,0), UP = V3(0,1,0), FWD = V3(0,0,1);
 const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
@@ -189,11 +198,11 @@ camera.wheelDeltaPercentage = 0.012; camera.pinchDeltaPercentage = 0.012;
 camera.panningSensibility = 0;
 
 const hemi = new BABYLON.HemisphericLight('hemi', V3(0,1,0), scene);
-hemi.intensity = 0.55; hemi.diffuse = new BABYLON.Color3(.9,.92,1);
+hemi.intensity = 0.9; hemi.diffuse = new BABYLON.Color3(.9,.92,1);
 hemi.groundColor = new BABYLON.Color3(.58,.46,.3);
 
 const sun = new BABYLON.DirectionalLight('sun', V3(-0.55,-0.72,0.42), scene);
-sun.intensity = 1.15; sun.diffuse = new BABYLON.Color3(1,.94,.82);
+sun.intensity = 3.0; sun.diffuse = new BABYLON.Color3(1,.94,.82);
 sun.position = V3(14,20,-10);
 sun.autoCalcShadowZBounds = true;
 const shGen = new BABYLON.ShadowGenerator(1024, sun);
@@ -202,11 +211,40 @@ shGen.useBlurExponentialShadowMap = true; shGen.blurKernel = 16; shGen.setDarkne
 const glow = new BABYLON.GlowLayer('glow', scene); glow.intensity = 0.45;
 const hl = new BABYLON.HighlightLayer('hl', scene, { blurHorizontalSize:1, blurVerticalSize:1 });
 
-/* ---------- материалы ---------- */
+/* ---------- материалы: albedo-текстуры + процедурные нормали ---------- */
 function tex(draw, w=256, h=256){
   const t = new BABYLON.DynamicTexture('t'+Math.random(), {width:w,height:h}, scene, true);
   draw(t.getContext(), w, h); t.update(); return t;
 }
+
+/* карта высот (canvas) → карта нормалей (текстура).
+   Центральные разности с заворотом координат → бесшовный тайлинг. */
+function normalTex(draw, w=256, h=256, strength=1){
+  const cv=document.createElement('canvas'); cv.width=w; cv.height=h;
+  const c=cv.getContext('2d');
+  draw(c,w,h);
+  const src=c.getImageData(0,0,w,h);
+  const out=c.createImageData(w,h);
+  const Hf=(x,y)=>src.data[(((y+h)%h)*w+((x+w)%w))*4]/255;
+  const s=strength*2.2;
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const dx=(Hf(x+1,y)-Hf(x-1,y))*s;
+      const dy=(Hf(x,y+1)-Hf(x,y-1))*s;
+      const inv=1/Math.sqrt(dx*dx+dy*dy+1);
+      const i=(y*w+x)*4;
+      out.data[i]  =(-dx*inv*.5+.5)*255;
+      out.data[i+1]=(-dy*inv*.5+.5)*255;
+      out.data[i+2]=(inv*.5+.5)*255;
+      out.data[i+3]=255;
+    }
+  }
+  const t=new BABYLON.DynamicTexture('nrm'+Math.random(),{width:w,height:h},scene,true);
+  t.getContext().putImageData(out,0,0);
+  t.update();
+  return t;
+}
+
 const plaidTex = tex((c,w,h)=>{ c.fillStyle='#a5402c'; c.fillRect(0,0,w,h);
   c.fillStyle='#7d2b20'; for(let i=0;i<w;i+=64){ c.fillRect(i,0,14,h); c.fillRect(0,i,w,14);}
   c.fillStyle='#d9c08a'; for(let i=22;i<w;i+=64){ c.fillRect(i,0,3,h); c.fillRect(0,i,w,3);} });
@@ -223,27 +261,156 @@ const sandTex = tex((c,w,h)=>{ c.fillStyle='#d5ae7e'; c.fillRect(0,0,w,h);
     c.fillStyle=g; c.fillRect(x-r,y-r,r*2,r*2);} }, 512, 512);
 sandTex.uScale = sandTex.vScale = 6;
 
+/* --- нормали тканей --- */
+/* хлопковое плетение: нить поверх нити (рубашка, платок, спальники) */
+const weaveBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  const cell=16;
+  for(let y=0;y<h;y+=cell) for(let x=0;x<w;x+=cell){
+    c.fillStyle=(((x+y)/cell)%2===0)?'#9c9c9c':'#646464';
+    c.fillRect(x+1,y+1,cell-2,cell-2);
+  }
+  for(let i=0;i<700;i++){
+    const v=(Math.random()<.5?rnd(150,210):rnd(50,90))|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,2,1);
+  }
+});
+weaveBump.uScale = weaveBump.vScale = 8;
+
+/* диагональный твилл (деним) */
+const twillBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let d=0; d<w+h; d+=8){
+    c.strokeStyle=((d/8)%2===0)?'#a0a0a0':'#606060';
+    c.lineWidth=4;
+    c.beginPath(); c.moveTo(d,0); c.lineTo(d-h,h); c.stroke();
+  }
+  for(let i=0;i<500;i++){
+    const v=rnd(90,170)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,1,1);
+  }
+});
+twillBump.uScale = twillBump.vScale = 8;
+
+/* кожаное зерно (сапоги, ремни, ленты) */
+const leatherBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let i=0;i<1400;i++){
+    const v=rnd(60,200)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.beginPath();
+    c.arc(Math.random()*w, Math.random()*h, rnd(1,2.6), 0, 6.3);
+    c.fill();
+  }
+  c.globalAlpha=.35;
+  c.drawImage(c.canvas,-1,0); c.drawImage(c.canvas,1,0);
+  c.drawImage(c.canvas,0,-1); c.drawImage(c.canvas,0,1);
+  c.globalAlpha=1;
+});
+leatherBump.uScale = leatherBump.vScale = 5;
+
+/* войлок (шляпа) */
+const feltBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let i=0;i<2400;i++){
+    const v=rnd(70,180)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,rnd(2,6),1);
+  }
+});
+feltBump.uScale = feltBump.vScale = 7;
+
+/* грубая парусина (палатка) */
+const canvasBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  const cell=32;
+  for(let y=0;y<h;y+=cell) for(let x=0;x<w;x+=cell){
+    c.fillStyle=(((x+y)/cell)%2===0)?'#a8a8a8':'#585858';
+    c.fillRect(x+2,y+2,cell-4,cell-4);
+  }
+  for(let i=0;i<600;i++){
+    const v=rnd(90,170)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,rnd(2,5),1);
+  }
+});
+canvasBump.uScale = canvasBump.vScale = 3;
+
+/* микропоры кожи (очень слабые) */
+const skinBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let i=0;i<1800;i++){
+    const v=rnd(96,160)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,1,1);
+  }
+},256,256,.35);
+skinBump.uScale = skinBump.vScale = 4;
+
+/* песчаные крупинки */
+const sandBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let i=0;i<2600;i++){
+    const v=rnd(70,190)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(Math.random()*w,Math.random()*h,rnd(1,3),rnd(1,2));
+  }
+},256,256,.8);
+sandBump.uScale = sandBump.vScale = 6;
+
+/* древесное волокно */
+const woodBump = normalTex((c,w,h)=>{
+  c.fillStyle='#808080'; c.fillRect(0,0,w,h);
+  for(let y=0;y<h;y+=4){
+    const v=rnd(88,168)|0;
+    c.fillStyle=`rgb(${v},${v},${v})`;
+    c.fillRect(0,y,w,2);
+  }
+  for(let i=0;i<40;i++){
+    c.strokeStyle='rgba(120,120,120,.5)';
+    c.lineWidth=1;
+    c.beginPath();
+    c.moveTo(0,Math.random()*h);
+    c.bezierCurveTo(w*.3,Math.random()*h, w*.7,Math.random()*h, w,Math.random()*h);
+    c.stroke();
+  }
+});
+woodBump.uScale = 2; woodBump.vScale = 3;
+
+/* PBR-фабрика: текстура задаёт цвет, bump — рельеф, metallic/roughness — блеск */
 function mat(name, color, o={}){
-  const m = new BABYLON.StandardMaterial(name, scene);
-  m.diffuseColor = BABYLON.Color3.FromHexString(color);
-  m.specularColor = new BABYLON.Color3(o.spec??.08, o.spec??.08, o.spec??.08);
-  m.specularPower = o.power ?? 48;
-  if(o.tex) m.diffuseTexture = o.tex;
+  const m = new BABYLON.PBRMaterial(name, scene);
+  m.albedoColor = o.tex ? BABYLON.Color3.White() : BABYLON.Color3.FromHexString(color);
+  m.metallic = o.metallic ?? 0;
+  m.roughness = o.roughness ?? .9;
+  if(o.tex) m.albedoTexture = o.tex;
+  if(o.bump) m.bumpTexture = o.bump;
   if(o.emissive) m.emissiveColor = BABYLON.Color3.FromHexString(o.emissive);
   return m;
 }
 const MAT = {
-  skin: mat('skin','#d8955e',{spec:.12}), shirt: mat('shirt','#a5402c',{tex:plaidTex}),
-  vest: mat('vest','#4f331c',{spec:.14}), pants: mat('pants','#3d5878',{tex:denimTex}),
-  boot: mat('boot','#6b4423',{spec:.2,power:64}), sole: mat('sole','#332214'),
-  hat: mat('hat','#b8894f'), hatband: mat('hatband','#4a2c15'),
-  bandana: mat('bandana','#b23a2e',{spec:.15}), belt: mat('belt','#3f2713'),
-  buckle: mat('buckle','#d9a441',{spec:.6,power:96,emissive:'#5a3f10'}),
-  metal: mat('metal','#9a9a9a',{spec:.7,power:96}), wood: mat('wood','#6d4a2a'),
-  cactus: mat('cactus','#56804b',{spec:.05}), rock: mat('rock','#8d7a66'),
-  cotton: mat('cotton','#f2e8d5'), stitch: mat('stitch','#7a2d22'),
-  hair: mat('hair','#4a2f1a'), dark: mat('dark','#2a1c12'),
-  white: mat('white','#f5f0e6',{spec:.3}),
+  skin: mat('skin','#d8955e',{roughness:.55, bump:skinBump}),
+  shirt: mat('shirt','#a5402c',{tex:plaidTex, roughness:.92, bump:weaveBump}),
+  vest: mat('vest','#4f331c',{roughness:.5, bump:leatherBump}),
+  pants: mat('pants','#3d5878',{tex:denimTex, roughness:.85, bump:twillBump}),
+  boot: mat('boot','#6b4423',{roughness:.4, bump:leatherBump}),
+  sole: mat('sole','#332214',{roughness:.9}),
+  hat: mat('hat','#b8894f',{roughness:.95, bump:feltBump}),
+  hatband: mat('hatband','#4a2c15',{roughness:.5, bump:leatherBump}),
+  bandana: mat('bandana','#b23a2e',{roughness:.8, bump:weaveBump}),
+  belt: mat('belt','#3f2713',{roughness:.45, bump:leatherBump}),
+  buckle: mat('buckle','#d9a441',{metallic:.9, roughness:.35, emissive:'#5a3f10'}),
+  metal: mat('metal','#9a9a9a',{metallic:1, roughness:.3}),
+  wood: mat('wood','#6d4a2a',{roughness:.8, bump:woodBump}),
+  cactus: mat('cactus','#56804b',{roughness:.85}),
+  rock: mat('rock','#8d7a66',{roughness:.95}),
+  cotton: mat('cotton','#f2e8d5',{roughness:.95}),
+  stitch: mat('stitch','#7a2d22',{roughness:.8}),
+  hair: mat('hair','#4a2f1a',{roughness:.75}),
+  dark: mat('dark','#2a1c12',{roughness:.45}),
+  white: mat('white','#f5f0e6',{roughness:.3}),
 };
 
 /* ---------- небо и земля ---------- */
@@ -253,7 +420,7 @@ const skyTex = tex((c,w,h)=>{
   g.addColorStop(.5,'#f0dcae'); g.addColorStop(1,'#f0dcae');
   c.fillStyle=g; c.fillRect(0,0,w,h); }, 8, 256);
 const sky = BABYLON.MeshBuilder.CreateSphere('sky',{diameter:170,sideOrientation:BABYLON.Mesh.BACKSIDE},scene);
-{ const m = new BABYLON.StandardMaterial('skyM',scene);
+{ const m = new BABYLON.StandardMaterial('skyM',scene);   /* чисто эмиссивное — PBR не нужен */
   m.emissiveTexture = skyTex; m.disableLighting = true; m.fogEnabled = false;
   sky.material = m; sky.isPickable = false; glow.addExcludedMesh(sky); }
 
@@ -263,7 +430,7 @@ const ground = BABYLON.MeshBuilder.CreateGround('ground',{width:70,height:70,sub
     const f = clamp((d-4)/7,0,1);
     pos[i+1] += (Math.sin(x*.33)*Math.cos(z*.27)*.4 + Math.sin(x*.11+z*.17)*.55)*f; }
   ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind,pos); ground.createNormals(false); }
-ground.material = mat('gnd','#d5ae7e',{tex:sandTex});
+ground.material = mat('gnd','#d5ae7e',{tex:sandTex, bump:sandBump, roughness:.96});
 ground.receiveShadows = true;
 ground.isPickable = true; /* фонтанчик пыли при промахе */
 
@@ -350,24 +517,25 @@ const signPost=deco(BABYLON.MeshBuilder.CreateCylinder('sp',{height:1.15,diamete
 signPost.position.set(1.35,.57,.95); signPost.material=MAT.wood; shGen.addShadowCaster(signPost);
 const signBoard=deco(BABYLON.MeshBuilder.CreatePlane('sb',{width:.74,height:.5,sideOrientation:BABYLON.Mesh.DOUBLESIDE},scene));
 signBoard.position.set(1.35,1.12,.95); signBoard.rotation.y=-.35;
-{ const m=new BABYLON.StandardMaterial('sbM',scene); m.diffuseTexture=signTex; m.specularColor=new BABYLON.Color3(.05,.05,.05);
+{ const m=new BABYLON.PBRMaterial('sbM',scene);
+  m.albedoTexture=signTex; m.metallic=0; m.roughness=.92;
   signBoard.material=m; shGen.addShadowCaster(signBoard); }
 
 const tumble = deco(BABYLON.MeshBuilder.CreateSphere('tw',{diameter:.55,segments:5},scene));
 { const m = mat('tw','#8a6a3a'); m.wireframe=true; tumble.material=m; }
 
 /* ============================================================
-   ЛАГЕРЬ: Билл в шляпе и трусах сидит на срубленном дереве
-   и ЖАРИТ СОСИСКУ на прутике над костром. Рядом палатка.
+   ЛАГЕРЬ: Билл в шляпе и трусах на срубленном дереве —
+   ЖАРИТ СОСИСКУ над костром. Рядом палатка.
    ============================================================ */
 const CM = {
-  cloth: mat('tentCloth', '#c9b085', {spec:.05}),
-  clothDark: mat('tentDark', '#8a6f4c'),
-  rope: mat('rope', '#b39b6d'),
-  charred: mat('charred', '#241812', {spec:.15}),
-  cutwood: mat('cutwood', '#c9a97a', {spec:.1}),
-  bedroll: mat('bedroll', '#8f3b2c'),
-  bedroll2: mat('bedroll2', '#4e6a7d'),
+  cloth: mat('tentCloth', '#c9b085', {roughness:.95, bump:canvasBump}),
+  clothDark: mat('tentDark', '#8a6f4c', {roughness:.95}),
+  rope: mat('rope', '#b39b6d', {roughness:.9}),
+  charred: mat('charred', '#241812', {roughness:.7}),
+  cutwood: mat('cutwood', '#c9a97a', {roughness:.8, bump:woodBump}),
+  bedroll: mat('bedroll', '#8f3b2c', {roughness:.95, bump:weaveBump}),
+  bedroll2: mat('bedroll2', '#4e6a7d', {roughness:.95, bump:weaveBump}),
 };
 CM.cloth.backFaceCulling = false;
 CM.clothDark.backFaceCulling = false;
@@ -379,7 +547,7 @@ const briefTex = tex((c,w,h)=>{
     c.beginPath(); c.arc(x*64+32+(y%2)*32, y*64+32, 10, 0, Math.PI*2); c.fill();
   }
 });
-const briefsM = mat('briefs', '#c0392b', {tex:briefTex});
+const briefsM = mat('briefs', '#c0392b', {tex:briefTex, roughness:.85, bump:weaveBump});
 
 /* «палка» между двумя точками (координаты — в системе родителя) */
 function strut(a, b, r, material, parent){
@@ -447,7 +615,7 @@ ember.scaling.y=.55; ember.isPickable=false;
 
 const fireLight = new BABYLON.PointLight('fireLight', V3(FIRE.x,.55,FIRE.z), scene);
 fireLight.diffuse = new BABYLON.Color3(1,.62,.28);
-fireLight.intensity = 1.1; fireLight.range = 8;
+fireLight.intensity = 3.5; fireLight.range = 8;
 
 { const ps = new BABYLON.ParticleSystem('flames', 220, scene);
   ps.particleTexture = flare;
@@ -550,7 +718,7 @@ grillPivot.parent = stickNode;
 grillPivot.position.copyFrom(stickB);
 const stickDir = stickB.subtract(stickA); stickDir.normalize();
 grillPivot.rotationQuaternion = rotFromTo(UP, stickDir);
-const sausageM = mat('sausage','#b0493a',{spec:.3, power:26, emissive:'#2a0c06'});
+const sausageM = mat('sausage','#b0493a',{roughness:.45, emissive:'#2a0c06'});
 const sausage = BABYLON.MeshBuilder.CreateCapsule('sausage',{height:.19,radius:.033,tessellation:10,capSubdivisions:4},scene);
 sausage.material = sausageM;
 sausage.parent = grillPivot;
@@ -631,8 +799,8 @@ gunRoot.parent = camera;
 const GUN_BASE = V3(0, -0.40, 1.55);
 gunRoot.position.copyFrom(GUN_BASE);
 
-const gunMetal = mat('gunMetal', '#3f434b', {spec:.9, power:128});
-const gunWood  = mat('gunWood',  '#5a3620', {spec:.25, power:60});
+const gunMetal = mat('gunMetal', '#3f434b', {metallic:.95, roughness:.38});
+const gunWood  = mat('gunWood',  '#5a3620', {roughness:.55, bump:woodBump});
 
 function gunPart(mesh, parent){
   mesh.parent = parent;
@@ -845,7 +1013,7 @@ function creakStart(){ if(!AC||muted||creak) return;
 function creakUpdate(s){ if(!creak) return; const t=AC.currentTime;
   creak.o.frequency.setTargetAtTime(clamp(60+(s-1)*150,50,420),t,.05);
   creak.f.frequency.setTargetAtTime(300+s*260,t,.05);
-  creak.gain.setTargetAtTime(clamp(.02+(s-1)*.08,.02,.09),t,.05); }
+  creak.g.gain.setTargetAtTime(clamp(.02+(s-1)*.08,.02,.09),t,.05); }
 function creakStop(){ if(!creak) return; const c=creak; creak=null;
   c.g.gain.setTargetAtTime(.0001,AC.currentTime,.05); c.o.stop(AC.currentTime+.25); }
 function sfxPop(){ if(!AC||muted) return; const t=AC.currentTime;
@@ -1036,7 +1204,7 @@ function fire(px, py){
   recoilT = 1; drumSpinT = .3;
   flashLight.setEnabled(true);
   flashLight.position.copyFrom(from);
-  flashLight.intensity = 2.4; flashT = .07;
+  flashLight.intensity = 8; flashT = .07;
 
   if(hitMesh){
     stat.hits++; updStats();
@@ -1249,7 +1417,7 @@ scene.onBeforeRenderObservable.add(()=>{
   }
   if(flashT>0){
     flashT-=dt;
-    flashLight.intensity = 2.4*Math.max(0,flashT)/.07;
+    flashLight.intensity = 8*Math.max(0,flashT)/.07;
     if(flashT<=0){ flashT=0; flashLight.setEnabled(false); }
   }
 
@@ -1382,7 +1550,7 @@ scene.onBeforeRenderObservable.add(()=>{
     if(shockT<=0){ mouthO.isVisible=false; brows.forEach(b=>b.m.position.y=b.by); eyes.forEach(e=>e.scaling.set(1,1,.55)); } }
 
   /* лагерь: огонь, Билл и сосиска */
-  campAnim.fireLight.intensity = 1.0 + Math.sin(time*9.3)*.22 + Math.sin(time*21.7)*.11 + Math.sin(time*3.7)*.15;
+  campAnim.fireLight.intensity = 3.5 + Math.sin(time*9.3)*.7 + Math.sin(time*21.7)*.35 + Math.sin(time*3.7)*.5;
   const es = 1 + .08*Math.sin(time*8.2);
   campAnim.ember.scaling.set(es, .55*(1+.12*Math.sin(time*6.3)), es);
   campAnim.chest.scaling.set(1.02*(1+.03*Math.sin(time*1.5+campAnim.phase)), .82, .86);
