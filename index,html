@@ -10,11 +10,12 @@
   :root{ --gold:#d9a441; --cream:#f2e3c2; --leather:#2a1a0e; --red:#b0392b; }
   *{ box-sizing:border-box; margin:0; padding:0; }
   html,body{ height:100%; overflow:hidden; background:#e9d3a6; font-family:'PT Sans',sans-serif; color:var(--cream); }
-  #renderCanvas{ width:100%; height:100%; display:block; touch-action:none; outline:none; }
+  #renderCanvas{ width:100%; height:100%; display:block; touch-action:none; outline:none; cursor:crosshair; }
   #vignette{ position:fixed; inset:0; pointer-events:none; z-index:3;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(40,22,8,.42) 100%); }
   .hud{ position:fixed; z-index:10; animation:fadein .9s ease both; }
   @keyframes fadein{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;} }
+  @keyframes blinkA{ 50%{opacity:.35;} }
 
   .poster{ top:18px; left:18px; width:308px; padding:18px 20px 16px;
     background: linear-gradient(160deg,#33200f 0%, #241407 60%, #2c1a0b 100%);
@@ -46,6 +47,16 @@
   .stats{ margin-top:9px; font-size:12px; letter-spacing:.06em; color:#e8cf9d; opacity:.9; }
   .stats b{ color:var(--gold); }
 
+  .hprow{ display:flex; align-items:center; gap:8px; margin-top:9px; justify-content:flex-end; }
+  .hplbl{ font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:#e8cf9d; }
+  .hptrack{ width:140px; height:12px; border:2px solid var(--gold); border-radius:7px;
+    background:rgba(20,10,0,.55); overflow:hidden; }
+  #hpfill{ height:100%; width:100%; border-radius:4px; transition:width .25s, background .3s;
+    background:linear-gradient(90deg,#7fc25a,#a8c84f); }
+  #hpfill.low{ background:linear-gradient(90deg,#d9a441,#e0762e); }
+  #hpfill.crit{ background:linear-gradient(90deg,#e0512e,#b0392b); animation:blinkA .5s infinite; }
+  .mood{ margin-top:7px; font-size:12.5px; font-style:italic; color:#ffd98a; min-height:17px; }
+
   .chips{ left:18px; bottom:18px; display:flex; gap:7px; flex-wrap:wrap; max-width:70vw; }
   .chip{ font-size:12px; font-weight:700; letter-spacing:.03em; padding:6px 11px 6px 24px; position:relative;
     background:#241407; border:1.5px solid #6a4a22; border-radius:20px; transition:all .25s; }
@@ -66,12 +77,24 @@
   .tension.danger{ animation:jitter .12s infinite; }
   @keyframes jitter{ 0%{transform:translateX(calc(-50% - 2px));} 50%{transform:translateX(calc(-50% + 2px));} }
 
+  .ammo{ position:fixed; left:50%; bottom:70px; transform:translateX(-50%); z-index:9;
+    display:flex; gap:5px; pointer-events:none; }
+  .ammo .bullet{ width:8px; height:20px; border-radius:3px 3px 2px 2px;
+    background:linear-gradient(180deg,#e8b24a,#9a6a26); box-shadow:0 1px 3px rgba(0,0,0,.45); }
+  .ammo .bullet.spent{ background:linear-gradient(180deg,#3a2a1c,#241a10); box-shadow:none; }
+  .reloadHint{ position:fixed; left:50%; bottom:98px; transform:translateX(-50%); z-index:9;
+    font-size:12px; font-weight:700; letter-spacing:.12em; color:#ffd98a;
+    text-shadow:0 1px 3px rgba(0,0,0,.65); pointer-events:none; display:none; }
+  .reloadHint.show{ display:block; animation:blinkA .7s infinite; }
+
   .credit{ right:18px; bottom:16px; font-size:11px; letter-spacing:.08em; color:#7a5a30; }
 
   @media (max-width:700px){
     .poster{ width:230px; padding:12px 14px; }
     .poster h1 .l2{ font-size:32px; } .poster ul{ display:none; }
     .chips{ max-width:56vw; } .credit{ display:none; }
+    .stats{ font-size:10.5px; }
+    .ammo{ bottom:60px; } .reloadHint{ bottom:86px; }
   }
 </style>
 </head>
@@ -86,18 +109,24 @@
   <ul>
     <li><b>Хватай</b> руку, ногу или голову и тяни в сторону</li>
     <li><b>Перетянешь</b> — оторвётся с треском и улетит</li>
-    <li><b>Пришьём</b>: поднеси деталь обратно к телу</li>
+    <li><b>Стреляй</b> из револьвера: отстреливай части, изрешети торс</li>
+    <li><b>Лечи</b>: каждая пришитая деталь возвращает 20 здоровья</li>
+    <li><b>Без ноги</b> или при нуле здоровья Джо падает — заштопай и он встанет</li>
   </ul>
-  <div class="keys"><span>🖱 тянуть</span><span>↔ вращать камеру</span><span>⚙ зум</span></div>
+  <div class="keys"><span>🖱 ЛКМ тянуть</span><span>🔫 ПКМ стрелять</span><span>R перезарядка</span><span>F огонь</span><span>↔ камера</span><span>⚙ зум</span></div>
 </div>
 
 <div class="hud topright">
   <div class="btns">
+    <button id="btnFire">🔫 Огонь</button>
     <button id="btnSew">🪡 Пришить всё</button>
     <button id="btnReset">↺ Сначала</button>
     <button id="btnMute" title="Звук">🔊</button>
   </div>
-  <div class="stats" id="stats">рывков <b>0</b> · оторвано <b>0</b> · пришито <b>0</b></div>
+  <div class="stats" id="stats">рывков <b>0</b> · оторвано <b>0</b> · пришито <b>0</b> · выстрелов <b>0</b> · в цель <b>0</b></div>
+  <div class="hprow"><span class="hplbl">здоровье</span>
+    <div class="hptrack"><div id="hpfill"></div></div></div>
+  <div class="mood" id="mood">Джо в отличной форме</div>
 </div>
 
 <div class="hud chips" id="chips"></div>
@@ -107,7 +136,10 @@
   <div class="track"><div id="tfill"></div></div>
 </div>
 
-<div class="hud credit">babylon.js · тяни мышью или пальцем</div>
+<div class="ammo" id="ammo"></div>
+<div class="reloadHint" id="reloadHint">R — ПЕРЕЗАРЯДКА</div>
+
+<div class="hud credit">у костра Билл жарит сосиску · ЛКМ тянуть · ПКМ стрелять · R перезарядка</div>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script>
@@ -125,8 +157,7 @@ const DOWN = V3(0,-1,0), UP = V3(0,1,0), FWD = V3(0,0,1);
 const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
 const rnd = (a,b)=>a+Math.random()*(b-a);
 
-/* «поворот от вектора к вектору» — Quaternion.RotationFromTo в Babylon.js НЕТ,
-   собираем сами поверх гарантированного RotationAxis(ось, угол) */
+/* «поворот от вектора к вектору» — Quaternion.RotationFromTo в Babylon.js НЕТ */
 function rotFromTo(from, to){
   const d = clamp(BABYLON.Vector3.Dot(from, to), -1, 1);
   if (d > 1 - 1e-9) return new BABYLON.Quaternion(0,0,0,1);
@@ -139,6 +170,14 @@ function rotFromTo(from, to){
   const axis = BABYLON.Vector3.Cross(from, to); axis.normalize();
   return BABYLON.Quaternion.RotationAxis(axis, Math.acos(d));
 }
+
+/* ---------- общее изменяемое состояние (объявлено ОДИН раз, до всех функций) ---------- */
+let drag=null, hoverLimb=null, lastHover=0;
+let idleT=0, shake=0, time=0, introT=0, blinkT=0, blinkNext=2.5, shockT=0, focusT=0, focusPos=null;
+let hintOn=false, dragPlane=null;
+const dragTarget=V3(0,0,0), lean=V3(0,0,0), _scr=V3(0,0,0);
+/* оружие игрока */
+let ammo=6, reloading=0, lastShot=-9, recoilT=0, drumSpinT=0, flashT=0;
 
 /* ---------- камера / свет ---------- */
 const camera = new BABYLON.ArcRotateCamera('cam', Math.PI/2, 1.18, 8.5, V3(0,1.02,0), scene);
@@ -225,10 +264,11 @@ const ground = BABYLON.MeshBuilder.CreateGround('ground',{width:70,height:70,sub
     pos[i+1] += (Math.sin(x*.33)*Math.cos(z*.27)*.4 + Math.sin(x*.11+z*.17)*.55)*f; }
   ground.updateVerticesData(BABYLON.VertexBuffer.PositionKind,pos); ground.createNormals(false); }
 ground.material = mat('gnd','#d5ae7e',{tex:sandTex});
-ground.receiveShadows = true; ground.isPickable = false;
+ground.receiveShadows = true;
+ground.isPickable = true; /* фонтанчик пыли при промахе */
 
 const sunBall = BABYLON.MeshBuilder.CreateSphere('sunBall',{diameter:5},scene);
-sunBall.position = V3(26,17,-34);
+sunBall.position = V3(26,16,-34);
 { const m = new BABYLON.StandardMaterial('sunM',scene);
   m.emissiveColor = new BABYLON.Color3(1,.9,.65); m.disableLighting = true; m.fogEnabled=false;
   sunBall.material = m; sunBall.isPickable=false; }
@@ -254,8 +294,11 @@ function burst(pos, opt){
   ps.start();
   setTimeout(()=>{ try{ ps.dispose(false); }catch(e){} }, Math.ceil((opt.life+.8)*1000));
 }
-const puffBurst = p=>burst(p,{count:26,life:.8,s:.15,color:new BABYLON.Color4(.96,.93,.86,.95),spread:.9,pw:1.6,grav:-2.5});
-const sewBurst  = p=>burst(p,{count:16,life:.5,s:.05,color:new BABYLON.Color4(1,.85,.4,.9),spread:.5,pw:1.2,grav:-1});
+const puffBurst  = p=>burst(p,{count:26,life:.8,s:.15,color:new BABYLON.Color4(.96,.93,.86,.95),spread:.9,pw:1.6,grav:-2.5});
+const sewBurst   = p=>burst(p,{count:16,life:.5,s:.05,color:new BABYLON.Color4(1,.85,.4,.9),spread:.5,pw:1.2,grav:-1});
+const dustBurst  = p=>burst(p,{count:12,life:.5,s:.12,color:new BABYLON.Color4(.85,.72,.5,.9),spread:.6,pw:1,grav:-3});
+const shotBurst  = p=>burst(p,{count:10,life:.35,s:.08,color:new BABYLON.Color4(.9,.35,.2,.9),spread:.5,pw:1.4,grav:-2});
+const greasePop  = p=>burst(p,{count:4,life:.3,s:.035,color:new BABYLON.Color4(1,.6,.2,.9),spread:.25,pw:.5,grav:-2});
 
 { const ps = new BABYLON.ParticleSystem('dust',120,scene);
   ps.particleTexture = flare; ps.emitter = V3(0,0,0); ps.emitRate = 9;
@@ -314,8 +357,8 @@ const tumble = deco(BABYLON.MeshBuilder.CreateSphere('tw',{diameter:.55,segments
 { const m = mat('tw','#8a6a3a'); m.wireframe=true; tumble.material=m; }
 
 /* ============================================================
-   ЛАГЕРЬ: ковбой в шляпе и трусах на срубленном дереве,
-   костёр и раскрытая палатка
+   ЛАГЕРЬ: Билл в шляпе и трусах сидит на срубленном дереве
+   и ЖАРИТ СОСИСКУ на прутике над костром. Рядом палатка.
    ============================================================ */
 const CM = {
   cloth: mat('tentCloth', '#c9b085', {spec:.05}),
@@ -448,7 +491,7 @@ fireLight.intensity = 1.1; fireLight.range = 8;
   ps.blendMode=BABYLON.ParticleSystem.BLENDMODE_STANDARD;
   ps.start(); }
 
-/* --- ковбой в шляпе и трусах --- */
+/* --- Билл: тело --- */
 const campCow = new BABYLON.TransformNode('campCow', scene);
 campCow.position.set(LOGP.x, .56, LOGP.z);
 campCow.rotation.y = Math.atan2(FIRE.x-LOGP.x, FIRE.z-LOGP.z);
@@ -459,21 +502,18 @@ ball(.27, V3(0,.2,.03), MAT.skin, campCow, [1,.93,.9]);
 ball(.115, V3(-.16,.48,.08), MAT.skin, campCow);
 ball(.115, V3(.16,.48,.08), MAT.skin, campCow);
 ball(.3, V3(0,.03,-.01), briefsM, campCow, [1.06,.78,.98]);
-for(const s of [-1,1]){
+for(const s of [-1,1]){ /* ноги */
   strut(V3(s*.1,.07,.03), V3(s*.13,-.02,.37), .075, MAT.skin, campCow);
   strut(V3(s*.13,-.02,.37), V3(s*.14,-.46,.43), .06, MAT.skin, campCow);
   ball(.12, V3(s*.14,-.5,.48), MAT.skin, campCow, [1,.55,1.55]);
 }
-const campHands=[];
+/* руки держат прутик с сосиской */
 for(const s of [-1,1]){
-  strut(V3(s*.16,.48,.08), V3(s*.22,.22,.2), .05, MAT.skin, campCow);
-  strut(V3(s*.22,.22,.2), V3(s*.08,.09,.36), .043, MAT.skin, campCow);
-  campHands.push(ball(.088, V3(s*.08,.09,.36), MAT.skin, campCow));
+  strut(V3(s*.16,.48,.08), V3(s*.20,.30,.24), .05, MAT.skin, campCow);
+  strut(V3(s*.20,.30,.24), V3(s*.05,.13,.40), .043, MAT.skin, campCow);
+  ball(.088, V3(s*.05,.13,.40), MAT.skin, campCow);
 }
-strut(V3(0,.5,.12), V3(0,.62,.15), .048, MAT.skin, campCow);
-/* ФИКС getUniqueId: TransformNode принимает (имя, СЦЕНА);
-   родитель — только через .parent. Раньше сюда попадал campCow,
-   Babylon звал campCow.getUniqueId() и падал. */
+strut(V3(0,.5,.12), V3(0,.62,.15), .048, MAT.skin, campCow); /* шея */
 const campHead = new BABYLON.TransformNode('campHead', scene);
 campHead.parent = campCow;
 campHead.position.set(0,.67,.16);
@@ -486,9 +526,8 @@ for(const s of [-1,1]){
   ball(.05, V3(s*.058,.105,.126), MAT.hair, campHead, [1,.3,.45]);
   ball(.05, V3(s*.145,.02,0), MAT.skin, campHead, [.45,1,.8]);
 }
-ball(.085, V3(0,-.05,.122), MAT.hair, campHead, [1,.34,.5]);
-ball(.05, V3(0,.005,.138), MAT.skin, campHead, [1,.9,1.05]);
-/* шляпа набекрень — тем же способом: scene + .parent */
+ball(.085, V3(0,-.05,.122), MAT.hair, campHead, [1,.34,.5]);  /* усы */
+ball(.05, V3(0,.005,.138), MAT.skin, campHead, [1,.9,1.05]);  /* нос */
 const ccHat = new BABYLON.TransformNode('ccHat', scene);
 ccHat.parent = campHead;
 ccHat.position.set(0,.17,.01);
@@ -500,9 +539,43 @@ ccHat.rotation.set(.14,.2,-.12);
   const hb = BABYLON.MeshBuilder.CreateCylinder('ccbd',{height:.04, diameter:.235, tessellation:14}, scene);
   hb.material=MAT.hatband; hb.parent=ccHat; hb.position.y=.02; hb.isPickable=false; }
 
+/* --- прутик с сосиской над костром --- */
+const stickNode = new BABYLON.TransformNode('stickNode', scene);
+stickNode.parent = campCow;
+const stickA = V3(0,.12,.40), stickB = V3(0,.66,1.18);
+strut(stickA, stickB, .013, MAT.wood, stickNode);
+/* вертел: ось Y узла совпадает с направлением прутика */
+const grillPivot = new BABYLON.TransformNode('grillPivot', scene);
+grillPivot.parent = stickNode;
+grillPivot.position.copyFrom(stickB);
+const stickDir = stickB.subtract(stickA); stickDir.normalize();
+grillPivot.rotationQuaternion = rotFromTo(UP, stickDir);
+const sausageM = mat('sausage','#b0493a',{spec:.3, power:26, emissive:'#2a0c06'});
+const sausage = BABYLON.MeshBuilder.CreateCapsule('sausage',{height:.19,radius:.033,tessellation:10,capSubdivisions:4},scene);
+sausage.material = sausageM;
+sausage.parent = grillPivot;
+sausage.rotationQuaternion = rotFromTo(UP, V3(1,0,0)); /* лежит поперёк прутика */
+grillPivot.computeWorldMatrix(true);
+const sausageW = grillPivot.getAbsolutePosition();
+/* капли жира */
+{ const ps = new BABYLON.ParticleSystem('sizzle', 30, scene);
+  ps.particleTexture = flare;
+  ps.emitter = sausageW.add(V3(0,-.04,0));
+  ps.minEmitBox=V3(-.05,-.01,-.05); ps.maxEmitBox=V3(.05,.02,.05);
+  ps.color1=new BABYLON.Color4(.85,.6,.3,.85); ps.color2=new BABYLON.Color4(.7,.45,.2,.8);
+  ps.colorDead=new BABYLON.Color4(.6,.4,.2,0);
+  ps.minSize=.012; ps.maxSize=.03;
+  ps.minLifeTime=.25; ps.maxLifeTime=.5;
+  ps.emitRate=3;
+  ps.direction1=V3(-.05,-1,-.05); ps.direction2=V3(.05,-1.4,.05);
+  ps.minEmitPower=.05; ps.maxEmitPower=.15;
+  ps.gravity=V3(0,-3,0);
+  ps.blendMode=BABYLON.ParticleSystem.BLENDMODE_STANDARD;
+  ps.start(); }
+
 const campAnim = {
-  fireLight, ember, chest:campChest, head:campHead,
-  eyes:campEyes, hands:campHands,
+  fireLight, ember, chest:campChest, head:campHead, eyes:campEyes,
+  stick:stickNode, grill:grillPivot, sw:sausageW,
   bNext: rnd(1.5,4), bT:0, phase: rnd(0,6)
 };
 
@@ -549,16 +622,75 @@ tent.rotation.y = Math.atan2(FIRE.x-TENT.x, FIRE.z-TENT.z);
   }
 }
 
+/* ============================================================
+   РЕВОЛЬВЕР ИГРОКА: viewmodel у нижнего центра экрана,
+   привязан к камере (renderingGroupId=1 — поверх сцены)
+   ============================================================ */
+const gunRoot = new BABYLON.TransformNode('gunRoot', scene);
+gunRoot.parent = camera;
+const GUN_BASE = V3(0, -0.40, 1.55);
+gunRoot.position.copyFrom(GUN_BASE);
+
+const gunMetal = mat('gunMetal', '#3f434b', {spec:.9, power:128});
+const gunWood  = mat('gunWood',  '#5a3620', {spec:.25, power:60});
+
+function gunPart(mesh, parent){
+  mesh.parent = parent;
+  mesh.renderingGroupId = 1; /* рисуем поверх сцены, как viewmodel */
+  mesh.isPickable = false;   /* не перехватывает лучи прицеливания */
+  return mesh;
+}
+{ /* рукоять */
+  const grip = gunPart(BABYLON.MeshBuilder.CreateBox('grip',{width:.034,height:.085,depth:.05},scene), gunRoot);
+  grip.material = gunWood; grip.position.set(0,-.072,-.055); grip.rotation.x=.35;
+  /* рама */
+  const frame = gunPart(BABYLON.MeshBuilder.CreateBox('gframe',{width:.042,height:.03,depth:.16},scene), gunRoot);
+  frame.material = gunMetal; frame.position.set(0,-.012,.005);
+  /* ствол (цилиндр по Y → поворот на X кладёт его вдоль Z) */
+  const barrel = gunPart(BABYLON.MeshBuilder.CreateCylinder('gbar',{height:.17,diameter:.03,tessellation:10},scene), gunRoot);
+  barrel.material = gunMetal; barrel.rotation.x=Math.PI/2; barrel.position.set(0,.012,.115);
+  /* экстрактор под стволом */
+  const rod = gunPart(BABYLON.MeshBuilder.CreateCylinder('grod',{height:.12,diameter:.012,tessellation:8},scene), gunRoot);
+  rod.material = gunMetal; rod.rotation.x=Math.PI/2; rod.position.set(0,-.014,.1);
+  /* курок */
+  const hammer = gunPart(BABYLON.MeshBuilder.CreateBox('gham',{width:.014,height:.04,depth:.022},scene), gunRoot);
+  hammer.material = gunMetal; hammer.position.set(0,.022,-.055);
+  /* спусковая скоба */
+  const trig = gunPart(BABYLON.MeshBuilder.CreateTorus('gtrig',{diameter:.024,thickness:.007,tessellation:8},scene), gunRoot);
+  trig.material = gunMetal; trig.rotation.x=Math.PI/2; trig.position.set(0,-.045,.015);
+  /* мушка */
+  const sight = gunPart(BABYLON.MeshBuilder.CreateBox('gsight',{width:.006,height:.02,depth:.01},scene), gunRoot);
+  sight.material = gunMetal; sight.position.set(0,.032,.19);
+}
+/* барабан: обёртка-узел, локальная ось Y которой смотрит вперёд (вдоль Z) —
+   вращение пост-умножением кватерниона = прокрут барабана вокруг оси ствола */
+const drumWrap = new BABYLON.TransformNode('drumWrap', scene);
+drumWrap.parent = gunRoot;
+drumWrap.position.set(0,-.002,.012);
+drumWrap.rotationQuaternion = rotFromTo(UP, FWD);
+{ const drum = gunPart(BABYLON.MeshBuilder.CreateCylinder('gdrum',{height:.055,diameter:.052,tessellation:8},scene), drumWrap);
+  drum.material = gunMetal; }
+/* точка дула — от неё летит трассер */
+const muzzleNode = new BABYLON.TransformNode('muzzle', scene);
+muzzleNode.parent = gunRoot;
+muzzleNode.position.set(0,.012,.205);
+
 /* ---------- ГЛАВНЫЙ КОВБОЙ ---------- */
 const cowboy = new BABYLON.TransformNode('cowboy',scene);
 const pickMap = new Map();
 const limbs = [];
+const bodyMeshes = new Set(); /* меши ТОРСА — цель для урона HP */
 
 function M(builder, material, pos, opt={}){
   const m = builder(); m.material = material; m.position.set(pos[0],pos[1],pos[2]);
   if(opt.s) m.scaling.set(opt.s[0],opt.s[1],opt.s[2]);
   if(opt.r) m.rotation.set(opt.r[0],opt.r[1],opt.r[2]);
-  m.parent = opt.parent || cowboy; m.isPickable=false; m.receiveShadows=true;
+  m.parent = opt.parent || cowboy;
+  m.receiveShadows=true;
+  /* торс (parent не null) пикается для урона; меши конечностей станут
+     пикаемыми в makeLimb */
+  if(opt.parent !== null){ m.isPickable = true; bodyMeshes.add(m); }
+  else m.isPickable = false;
   shGen.addShadowCaster(m); return m;
 }
 const capsule=(h,r)=>()=>BABYLON.MeshBuilder.CreateCapsule('c',{height:h,radius:r,capSubdivisions:4},scene);
@@ -659,10 +791,12 @@ function makeLimb(cfg){
   limb.root.getDescendants(false).forEach(n=>{
     if(n instanceof BABYLON.Mesh){ limb.meshes.push(n); pickMap.set(n, limb); n.isPickable = true; }
   });
+  /* невидимая, но ПИКАЕМАЯ зона захвата: visibility=0 */
   const helper = BABYLON.MeshBuilder.CreateSphere('pick',{diameter:cfg.pickR},scene);
   helper.parent = cfg.pickParent; helper.position.copyFrom(cfg.pickPos);
   helper.visibility = 0; helper.isPickable = true; helper.__pickHelper = true;
   pickMap.set(helper, limb); limb.meshes.push(helper);
+  /* «рана» на месте отрыва */
   const cap = new BABYLON.TransformNode('cap',scene);
   cap.parent = cowboy; cap.position.copyFrom(limb.socketLocal);
   cap.rotationQuaternion = cfg.restQuat.clone();
@@ -677,23 +811,23 @@ function makeLimb(cfg){
 const Q=(ax,ang)=>BABYLON.Quaternion.RotationAxis(ax,ang);
 const armL = buildArm(1), armR = buildArm(-1), legL = buildLeg(1), legR = buildLeg(-1);
 
-makeLimb({ id:'head', ru:'Голова', root:headRoot, tipExtent:.40, axis:UP,
+const limbHead = makeLimb({ id:'head', ru:'Голова', root:headRoot, tipExtent:.40, axis:UP,
   thr:2.6, groundR:.16, twist:true, sway:.02,
   restQuat: Q(V3(0,0,1),-.03).multiply(Q(V3(1,0,0),.02)), bends:[],
   pickR:.46, pickParent:headRoot, pickPos:V3(0,.26,0), capR:.075 });
-makeLimb({ id:'armL', ru:'Левая рука', root:armL.root, tipExtent:-.60, axis:DOWN,
+const limbArmL = makeLimb({ id:'armL', ru:'Левая рука', root:armL.root, tipExtent:-.60, axis:DOWN,
   thr:2.5, groundR:.11, twist:false, sway:.03,
   restQuat: Q(V3(0,0,1),.20).multiply(Q(V3(1,0,0),-.12)), bends:[[armL.elbow,-.32]],
   pickR:.30, pickParent:armL.elbow, pickPos:V3(0,-.28,0), capR:.085 });
-makeLimb({ id:'armR', ru:'Правая рука', root:armR.root, tipExtent:-.60, axis:DOWN,
+const limbArmR = makeLimb({ id:'armR', ru:'Правая рука', root:armR.root, tipExtent:-.60, axis:DOWN,
   thr:2.5, groundR:.11, twist:false, sway:.03,
   restQuat: Q(V3(0,0,1),-.20).multiply(Q(V3(1,0,0),-.12)), bends:[[armR.elbow,-.32]],
   pickR:.30, pickParent:armR.elbow, pickPos:V3(0,-.28,0), capR:.085 });
-makeLimb({ id:'legL', ru:'Левая нога', root:legL.root, tipExtent:-.92, axis:DOWN,
+const limbLegL = makeLimb({ id:'legL', ru:'Левая нога', root:legL.root, tipExtent:-.92, axis:DOWN,
   thr:2.1, groundR:.12, twist:true, sway:.008,
   restQuat: Q(V3(0,0,1),.045), bends:[[legL.knee,.1]],
   pickR:.34, pickParent:legL.knee, pickPos:V3(0,-.4,0), capR:.095 });
-makeLimb({ id:'legR', ru:'Правая нога', root:legR.root, tipExtent:-.92, axis:DOWN,
+const limbLegR = makeLimb({ id:'legR', ru:'Правая нога', root:legR.root, tipExtent:-.92, axis:DOWN,
   thr:2.1, groundR:.12, twist:true, sway:.008,
   restQuat: Q(V3(0,0,1),-.045), bends:[[legR.knee,.1]],
   pickR:.34, pickParent:legR.knee, pickPos:V3(0,-.4,0), capR:.095 });
@@ -711,7 +845,7 @@ function creakStart(){ if(!AC||muted||creak) return;
 function creakUpdate(s){ if(!creak) return; const t=AC.currentTime;
   creak.o.frequency.setTargetAtTime(clamp(60+(s-1)*150,50,420),t,.05);
   creak.f.frequency.setTargetAtTime(300+s*260,t,.05);
-  creak.g.gain.setTargetAtTime(clamp(.02+(s-1)*.08,.02,.09),t,.05); }
+  creak.gain.setTargetAtTime(clamp(.02+(s-1)*.08,.02,.09),t,.05); }
 function creakStop(){ if(!creak) return; const c=creak; creak=null;
   c.g.gain.setTargetAtTime(.0001,AC.currentTime,.05); c.o.stop(AC.currentTime+.25); }
 function sfxPop(){ if(!AC||muted) return; const t=AC.currentTime;
@@ -728,32 +862,211 @@ function sfxSew(){ if(!AC||muted) return; const t=AC.currentTime;
   [620,930].forEach((f,i)=>{ const o=AC.createOscillator(), g=AC.createGain(); o.type='square';
     o.frequency.value=f; g.gain.setValueAtTime(.1,t+i*.08); g.gain.exponentialRampToValueAtTime(.001,t+i*.08+.07);
     o.connect(g); g.connect(master); o.start(t+i*.08); o.stop(t+i*.08+.09); }); }
+function sfxShot(){ if(!AC||muted) return; const t=AC.currentTime;
+  const len=Math.floor(AC.sampleRate*.18);
+  const buf=AC.createBuffer(1,len,AC.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++){ const k=1-i/len; d[i]=(Math.random()*2-1)*k*k; }
+  const src=AC.createBufferSource(); src.buffer=buf;
+  const f=AC.createBiquadFilter(); f.type='lowpass';
+  f.frequency.setValueAtTime(3400,t); f.frequency.exponentialRampToValueAtTime(220,t+.16);
+  const g=AC.createGain(); g.gain.setValueAtTime(.9,t); g.gain.exponentialRampToValueAtTime(.001,t+.18);
+  src.connect(f); f.connect(g); g.connect(master); src.start(t);
+  const o=AC.createOscillator(), og=AC.createGain(); o.type='triangle';
+  o.frequency.setValueAtTime(190,t); o.frequency.exponentialRampToValueAtTime(46,t+.12);
+  og.gain.setValueAtTime(.5,t); og.gain.exponentialRampToValueAtTime(.001,t+.14);
+  o.connect(og); og.connect(master); o.start(t); o.stop(t+.16); }
+function sfxHit(){ if(!AC||muted) return; const t=AC.currentTime;
+  const o=AC.createOscillator(), g=AC.createGain(); o.type='triangle';
+  o.frequency.setValueAtTime(240,t); o.frequency.exponentialRampToValueAtTime(80,t+.09);
+  g.gain.setValueAtTime(.35,t); g.gain.exponentialRampToValueAtTime(.001,t+.11);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+.13); }
+function sfxThud(){ if(!AC||muted) return; const t=AC.currentTime;
+  const o=AC.createOscillator(), g=AC.createGain(); o.type='sine';
+  o.frequency.setValueAtTime(64,t); o.frequency.exponentialRampToValueAtTime(30,t+.22);
+  g.gain.setValueAtTime(.7,t); g.gain.exponentialRampToValueAtTime(.001,t+.26);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t+.3);
+  const len=Math.floor(AC.sampleRate*.15);
+  const buf=AC.createBuffer(1,len,AC.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len)*.8;
+  const n=AC.createBufferSource(), nf=AC.createBiquadFilter(), ng=AC.createGain();
+  n.buffer=buf; nf.type='lowpass'; nf.frequency.value=300; ng.gain.value=.5;
+  n.connect(nf); nf.connect(ng); ng.connect(master); n.start(t); }
+function sfxDry(){ if(!AC||muted) return; const t=AC.currentTime;
+  [1500,900].forEach((f,i)=>{ const o=AC.createOscillator(), g=AC.createGain(); o.type='square';
+    o.frequency.value=f; g.gain.setValueAtTime(.06,t+i*.05); g.gain.exponentialRampToValueAtTime(.001,t+i*.05+.04);
+    o.connect(g); g.connect(master); o.start(t+i*.05); o.stop(t+i*.05+.05); }); }
+function sfxReload(){ if(!AC||muted) return; const t=AC.currentTime;
+  [[0,700],[.35,420],[.7,900]].forEach(([d,f])=>{
+    const o=AC.createOscillator(), g=AC.createGain(); o.type='square';
+    o.frequency.setValueAtTime(f,t+d); o.frequency.exponentialRampToValueAtTime(f*.55,t+d+.06);
+    g.gain.setValueAtTime(.12,t+d); g.gain.exponentialRampToValueAtTime(.001,t+d+.07);
+    o.connect(g); g.connect(master); o.start(t+d); o.stop(t+d+.08); }); }
 
 /* ---------- HUD ---------- */
 const chipsEl=document.getElementById('chips'), statsEl=document.getElementById('stats');
 const tensionEl=document.getElementById('tension'), tFill=document.getElementById('tfill'), tLabel=document.getElementById('tlabel');
-const stat={pulls:0,tears:0,sewn:0};
-function updStats(){ statsEl.innerHTML=`рывков <b>${stat.pulls}</b> · оторвано <b>${stat.tears}</b> · пришито <b>${stat.sewn}</b>`; }
+const hpFill=document.getElementById('hpfill'), moodEl=document.getElementById('mood');
+const ammoEl=document.getElementById('ammo'), reloadHintEl=document.getElementById('reloadHint');
+const stat={pulls:0,tears:0,sewn:0,shots:0,hits:0};
+function updStats(){ statsEl.innerHTML=`рывков <b>${stat.pulls}</b> · оторвано <b>${stat.tears}</b> · пришито <b>${stat.sewn}</b> · выстрелов <b>${stat.shots}</b> · в цель <b>${stat.hits}</b>`; }
 limbs.forEach(l=>{ const c=document.createElement('div'); c.className='chip'; c.innerHTML=`<i></i>${l.ru}`;
   c.addEventListener('click',()=>{ if(!l.attached){ focusPos=l.root.position.clone(); focusT=2.4; }});
   chipsEl.appendChild(c); l.chip=c; });
 function updChips(){ limbs.forEach(l=>l.chip.classList.toggle('torn',!l.attached)); }
+function updAmmo(){
+  ammoEl.innerHTML='';
+  for(let i=0;i<6;i++){
+    const b=document.createElement('span');
+    b.className='bullet'+(i<ammo?'':' spent');
+    ammoEl.appendChild(b);
+  }
+  reloadHintEl.classList.toggle('show', ammo===0 && reloading<=0);
+}
+updAmmo();
 
+document.getElementById('btnFire').onclick = ()=>{ fire(scene.pointerX, scene.pointerY); };
 document.getElementById('btnSew').onclick = ()=>{ wakeAudio(); limbs.forEach(l=>{ if(!l.attached) reattach(l); }); };
 document.getElementById('btnReset').onclick = ()=>{ wakeAudio();
   limbs.forEach(l=>{ if(!l.attached) reattach(l,true); });
-  stat.pulls=stat.tears=stat.sewn=0; updStats();
+  stat.pulls=stat.tears=stat.sewn=stat.shots=stat.hits=0; updStats();
+  hp=100; dead=false; downTarget=0; downAmt=0; downPlayed=false;
+  ammo=6; reloading=0; recoilT=0; updAmmo();
+  cowboy.position.set(0,0,0); cowboy.rotation.set(0,0,0);
+  updateHealthUI();
   camera.alpha=Math.PI/2; camera.beta=1.18; camera.radius=4.6; lean.set(0,0,0);
   focusT=0; focusPos=null; camera.setTarget(V3(0,1.02,0)); };
 document.getElementById('btnMute').onclick = e=>{ muted=!muted; e.target.textContent = muted?'🔇':'🔊';
   wakeAudio(); if(master) master.gain.value = muted?0:.5; if(muted) creakStop(); };
 
+/* ---------- здоровье / устойчивость Джо ---------- */
+let hp=100, dead=false, downAmt=0, downTarget=0, downPlayed=false;
+function setMood(){
+  let m;
+  if(dead) m='☠ Джо пал в неравном бою…';
+  else if(downTarget>.5||downAmt>.5)
+    m=(!limbLegL.attached||!limbLegR.attached)?'Без опоры: Джо на земле':'Джо сбит с ног';
+  else if(hp>70) m='Джо в отличной форме';
+  else if(hp>40) m='Джо держится молодцом';
+  else if(hp>15) m='Джо ранен, но стоит';
+  else m='Джо на последних силах';
+  moodEl.textContent=m;
+}
+function updateHealthUI(){
+  hpFill.style.width=hp+'%';
+  hpFill.className= hp<=15?'crit': hp<=40?'low':'';
+  setMood();
+}
+function checkStanding(){
+  const down = dead || !limbLegL.attached || !limbLegR.attached;
+  if(down && downTarget<1){ downTarget=1; shockT=Math.max(shockT,1.2); }
+  if(!down && downTarget>0) downTarget=0;
+  setMood();
+}
+function damageJoe(n){
+  hp=Math.max(0,hp-n);
+  if(hp===0) dead=true;
+  updateHealthUI();
+  checkStanding();
+}
+function healJoe(n){
+  hp=Math.min(100,hp+n);
+  if(hp>0) dead=false;
+  updateHealthUI();
+  checkStanding();
+}
+updateHealthUI();
+
+/* ---------- оружие игрока: стрельба, трассеры, вспышки ---------- */
+const bulletM = new BABYLON.StandardMaterial('bulletM',scene);
+bulletM.emissiveColor = new BABYLON.Color3(1,.82,.35);
+bulletM.diffuseColor = BABYLON.Color3.Black();
+bulletM.disableLighting = true;
+const flashM = new BABYLON.StandardMaterial('flashM',scene);
+flashM.emissiveColor = new BABYLON.Color3(1,.87,.4);
+flashM.diffuseColor = BABYLON.Color3.Black();
+flashM.disableLighting = true;
+const tracers=[], flashes=[];
+const flashLight = new BABYLON.PointLight('flashLight', V3(0,0,0), scene);
+flashLight.diffuse = new BABYLON.Color3(1,.8,.4);
+flashLight.intensity = 0; flashLight.range = 4;
+flashLight.setEnabled(false);
+
+function spawnTracer(a, b){
+  const dir=b.subtract(a); const len=dir.length();
+  if(len<1e-4) return;
+  const m=BABYLON.MeshBuilder.CreateCapsule('bullet',{height:.26,radius:.011,tessellation:6,capSubdivisions:2},scene);
+  m.material=bulletM; m.isPickable=false;
+  m.position.copyFrom(a);
+  m.rotationQuaternion=rotFromTo(UP, dir.scale(1/len));
+  tracers.push({m,a:a.clone(),b:b.clone(),len,t:0});
+}
+function muzzleFlash(p){
+  const m=BABYLON.MeshBuilder.CreateSphere('fl',{diameter:.15,segments:6},scene);
+  m.material=flashM; m.isPickable=false; m.renderingGroupId=1; m.position.copyFrom(p);
+  flashes.push({m,t:0});
+}
+function fire(px, py){
+  if(reloading>0) return;
+  if(ammo<=0){ sfxDry(); return; }
+  if(time-lastShot<.34) return;
+  lastShot=time; ammo--; updAmmo();
+  wakeAudio(); introT=99; idleT=0;
+  stat.shots++; updStats();
+
+  muzzleNode.computeWorldMatrix(true);
+  const from = muzzleNode.getAbsolutePosition();
+
+  /* попадание — мгновенный луч из камеры через курсор; трассер — визуал */
+  const pick = scene.pick(px, py, m=>pickMap.has(m)||bodyMeshes.has(m));
+  let to, hitMesh=null;
+  if(pick && pick.hit && pick.pickedMesh){
+    hitMesh = pick.pickedMesh; to = pick.pickedPoint;
+  } else {
+    const ray = scene.createPickingRay(px, py, null, camera);
+    to = ray.origin.add(ray.direction.scale(30));
+    const gp = scene.pick(px, py, m=>m===ground);
+    if(gp && gp.hit){ to = gp.pickedPoint; dustBurst(to); }
+  }
+  const dir = to.subtract(from); const len = dir.length();
+  if(len>1e-4) dir.scaleInPlace(1/len);
+
+  spawnTracer(from, to);
+  muzzleFlash(from);
+  sfxShot();
+  recoilT = 1; drumSpinT = .3;
+  flashLight.setEnabled(true);
+  flashLight.position.copyFrom(from);
+  flashLight.intensity = 2.4; flashT = .07;
+
+  if(hitMesh){
+    stat.hits++; updStats();
+    if(pickMap.has(hitMesh)){
+      const limb = pickMap.get(hitMesh);
+      if(limb.attached){
+        tear(limb, dir);           /* отстрел: деталь улетает по ходу пули */
+        shotBurst(to);
+      } else {
+        if(!limb.fly) limb.fly={ v:V3(0,0,0), av:V3(0,0,0) };
+        limb.fly.v.addInPlace(dir.scale(3.2));
+        limb.fly.v.y=Math.max(limb.fly.v.y,1.4);
+        limb.fly.av.set(rnd(-5,5),rnd(-5,5),rnd(-5,5));
+        shotBurst(to); sfxHit();
+      }
+    } else if(bodyMeshes.has(hitMesh)){
+      damageJoe(12);
+      shotBurst(to); sfxHit();
+      shake=Math.max(shake,.3);
+    }
+  }
+}
+function reload(){
+  if(ammo>=6 || reloading>0) return;
+  reloading=.9;
+  sfxReload();
+  reloadHintEl.classList.remove('show');
+}
+
 /* ---------- ввод ---------- */
-let drag=null, dragTarget=V3(0,0,0), dragPlane=null, hoverLimb=null, lastHover=0;
-let idleT=0, shake=0, time=0, introT=0, blinkT=0, blinkNext=2.5, shockT=0, focusT=0, focusPos=null;
-const lean=V3(0,0,0);
-const _scr = V3(0,0,0);
-let hintOn=false;
 const HOVER_C=new BABYLON.Color3(1,.78,.28), HINT_C=new BABYLON.Color3(1,.84,.42);
 
 function setHint(on){
@@ -776,7 +1089,7 @@ function setHover(limb){
   if(hoverLimb) hoverLimb.meshes.forEach(m=>hl.removeMesh(m));
   hoverLimb=limb;
   if(limb) limb.meshes.forEach(m=>{ if(!m.__pickHelper) hl.addMesh(m, HOVER_C); });
-  canvas.style.cursor = limb ? 'grab' : 'default';
+  canvas.style.cursor = limb ? 'grab' : 'crosshair';
 }
 function startDrag(limb, point, ev){
   if(!limb) return;
@@ -800,7 +1113,7 @@ function endDrag(){
   if(!drag) return;
   const l=drag;
   l.dragging=false;
-  if(!l.attached){
+  if(!l.attached){ /* бросок: передаём детали скорость руки */
     if(!l.fly) l.fly={ v:V3(0,0,0), av:V3(0,0,0) };
     l.fly.v.copyFrom(l.throwV);
     if(l.fly.v.length()>7) l.fly.v.scaleInPlace(7/l.fly.v.length());
@@ -809,15 +1122,21 @@ function endDrag(){
   }
   drag=null; creakStop(); tensionEl.style.display='none';
   reattachCamera();
-  canvas.style.cursor='default';
+  canvas.style.cursor='crosshair';
 }
 scene.onPointerObservable.add(pi=>{
   idleT=0;
   const ev = pi.input;
   if(pi.type===BABYLON.PointerEventTypes.POINTERDOWN){
     wakeAudio(); introT=99;
-    if(ev && ev.pointerType!=='touch' && ev.button!==0) return;
-    const pr = scene.pick(scene.pointerX, scene.pointerY, m=>pickMap.has(m));
+    let px=scene.pointerX, py=scene.pointerY;
+    if(ev && ev.clientX!==undefined){
+      const r=canvas.getBoundingClientRect();
+      px=ev.clientX-r.left; py=ev.clientY-r.top;
+    }
+    if(ev && ev.pointerType!=='touch' && ev.button===2){ fire(px,py); return; } /* ПКМ — выстрел */
+    if(ev && ev.pointerType!=='touch' && ev.button!==0) return;                  /* ЛКМ — тянет */
+    const pr = scene.pick(px, py, m=>pickMap.has(m));
     if(pr && pr.hit && pr.pickedMesh){
       const limb = pickMap.get(pr.pickedMesh);
       if(limb){
@@ -836,6 +1155,11 @@ scene.onPointerObservable.add(pi=>{
     endDrag();
   }
 });
+window.addEventListener('keydown', e=>{
+  if(e.code==='KeyF') fire(scene.pointerX, scene.pointerY);
+  else if(e.code==='KeyR') reload();
+});
+canvas.addEventListener('contextmenu', e=>e.preventDefault());
 window.addEventListener('blur',()=>endDrag());
 canvas.addEventListener('wheel',()=>idleT=0);
 
@@ -876,12 +1200,13 @@ function tear(limb, dir){
   limb.root.position.addInPlace(tipWorld.subtract(tipNow));
   limb.stretch=1; limb.sVel=0; limb.throwV.set(0,0,0);
   const tang = V3(rnd(-1,1),0,rnd(-1,1)).scale(.8);
-  limb.fly = { v: dir.scale(2.2).add(V3(0,1.6,0)).add(tang), av: V3(rnd(-4,4),rnd(-4,4),rnd(-4,4)) };
+  limb.fly = { v: dir.scale(2.6).add(V3(0,1.6,0)).add(tang), av: V3(rnd(-4,4),rnd(-4,4),rnd(-4,4)) };
   limb.cap.setEnabled(true);
   cowboy.computeWorldMatrix(true);
   const socketW = BABYLON.Vector3.TransformCoordinates(limb.socketLocal, cowboy.getWorldMatrix());
   puffBurst(socketW); sfxPop(); stat.tears++; updStats(); updChips();
   shake=.5; shockT=1.6;
+  damageJoe(8); /* травма от отрыва + проверка падения */
 }
 function reattach(limb, silent){
   limb.root.computeWorldMatrix(true);
@@ -896,10 +1221,11 @@ function reattach(limb, silent){
   limb.root.scaling.set(1,1,1); limb.stretch=.72; limb.sVel=3.5;
   limb.attached=true; limb.dragging=false; limb.fly=null; limb.throwV.set(0,0,0);
   limb.cap.setEnabled(false);
-  if(drag===limb){ drag=null; creakStop(); tensionEl.style.display='none'; reattachCamera(); canvas.style.cursor='default'; }
+  if(drag===limb){ drag=null; creakStop(); tensionEl.style.display='none'; reattachCamera(); canvas.style.cursor='crosshair'; }
   if(!silent){ const socketW=BABYLON.Vector3.TransformCoordinates(limb.socketLocal, cowboy.getWorldMatrix());
     sewBurst(socketW); sfxSew(); stat.sewn++; updStats(); }
   updChips();
+  healJoe(20); /* пришивание лечит */
 }
 
 /* ---------- главный цикл ---------- */
@@ -907,10 +1233,42 @@ let prev=performance.now();
 scene.onBeforeRenderObservable.add(()=>{
   const now=performance.now(); let dt=Math.min(.05,(now-prev)/1000); prev=now; time+=dt;
 
+  /* трассеры и вспышки выстрелов */
+  for(let i=tracers.length-1;i>=0;i--){
+    const tr=tracers[i];
+    tr.t += dt*70/tr.len;
+    if(tr.t>=1){ tr.m.dispose(); tracers.splice(i,1); continue; }
+    BABYLON.Vector3.LerpToRef(tr.a, tr.b, tr.t, tr.m.position);
+  }
+  for(let i=flashes.length-1;i>=0;i--){
+    const fl=flashes[i];
+    fl.t += dt*12;
+    if(fl.t>=1){ fl.m.dispose(); flashes.splice(i,1); continue; }
+    fl.m.scaling.setAll(.7+fl.t*2.6);
+    fl.m.visibility = 1-fl.t;
+  }
+  if(flashT>0){
+    flashT-=dt;
+    flashLight.intensity = 2.4*Math.max(0,flashT)/.07;
+    if(flashT<=0){ flashT=0; flashLight.setEnabled(false); }
+  }
+
+  /* перезарядка и прокрут барабана */
+  if(reloading>0){
+    reloading-=dt;
+    if(reloading<=0){ reloading=0; ammo=6; updAmmo(); }
+  }
+  if(recoilT>0) recoilT=Math.max(0,recoilT-dt*4.5);
+  if(drumSpinT>0) drumSpinT=Math.max(0,drumSpinT-dt);
+  const spin = (drumSpinT>0?16:0)+(reloading>0?9:0);
+  if(spin>0){
+    drumWrap.rotationQuaternion = drumWrap.rotationQuaternion.multiply(BABYLON.Quaternion.RotationAxis(UP, spin*dt));
+  }
+
   for(const limb of limbs){
     const root=limb.root;
     if(!limb.attached){
-      if(limb.dragging){
+      if(limb.dragging){ /* несём оторванную деталь в руке */
         root.computeWorldMatrix(true);
         const tipOff=BABYLON.Vector3.TransformNormal(V3(0,limb.tipExtent,0), root.getWorldMatrix());
         const g = BABYLON.Vector3.TransformCoordinates(limb.grabOffsetLocal, root.getWorldMatrix());
@@ -925,7 +1283,7 @@ scene.onBeforeRenderObservable.add(()=>{
         cowboy.computeWorldMatrix(true);
         const sock = BABYLON.Vector3.TransformCoordinates(limb.socketLocal, cowboy.getWorldMatrix());
         if(root.position.subtract(sock).length()<.5) reattach(limb);
-      } else if(limb.fly){
+      } else if(limb.fly){ /* физика полёта */
         const f=limb.fly;
         f.v.y-=9.8*dt;
         root.position.addInPlace(f.v.scale(dt));
@@ -974,6 +1332,7 @@ scene.onBeforeRenderObservable.add(()=>{
     }
   }
 
+  /* наклон корпуса */
   let lx=0,lz=0;
   if(drag && drag.attached){
     const A=worldPos(drag.root); const v=dragTarget.subtract(A);
@@ -982,17 +1341,32 @@ scene.onBeforeRenderObservable.add(()=>{
       lx=(v.z/h)*amt; lz=-(v.x/h)*amt; }
   }
   lean.x+=(lx-lean.x)*(1-Math.exp(-6*dt)); lean.z+=(lz-lean.z)*(1-Math.exp(-6*dt));
-  cowboy.rotation.x=lean.x; cowboy.rotation.z=lean.z;
   cowboy.rotation.y=Math.sin(time*.6)*.02*(drag?0:1);
 
-  const br=1+.02*Math.sin(time*1.7);
-  chest.scaling.set(br,.86,.72*br);
+  /* опрокидывание / подъём */
+  const kFall = downTarget>downAmt ? 5.5 : 3.0;
+  downAmt += (downTarget-downAmt)*(1-Math.exp(-kFall*dt));
+  if(downAmt>.002){
+    cowboy.position.y = .24*downAmt;
+    cowboy.rotation.x = lean.x + (-1.52-lean.x)*downAmt;
+    cowboy.rotation.z = lean.z*(1-downAmt) + .14*downAmt;
+    if(downAmt>.85 && !downPlayed){
+      downPlayed=true; sfxThud(); shake=Math.max(shake,.7);
+      puffBurst(V3(0,.15,-.85)); dustBurst(V3(.35,.12,-1.1)); dustBurst(V3(-.3,.12,-1.0));
+    }
+  } else { cowboy.position.y=0; cowboy.rotation.x=lean.x; cowboy.rotation.z=lean.z; }
+  if(downAmt<.3) downPlayed=false;
 
+  /* дыхание (мёртвый не дышит) */
+  const br=1+.02*Math.sin(time*1.7);
+  chest.scaling.set(hp>0?br:1,.86,.72*(hp>0?br:1));
+
+  /* взгляд и моргание */
   const head=limbs[0];
-  if(head.attached){
-    const hp=worldPos(head.root).add(V3(0,.24,0));
+  if(head.attached && !dead){
+    const hp2=worldPos(head.root).add(V3(0,.24,0));
     const lookAt = drag ? dragTarget : camera.position;
-    const dirW = lookAt.subtract(hp).normalize();
+    const dirW = lookAt.subtract(hp2).normalize();
     const invQ=head.root.rotationQuaternion.clone(); invQ.conjugateInPlace();
     const mInv=BABYLON.Matrix.Identity();
     BABYLON.Matrix.FromQuaternionToRef(invQ, mInv);
@@ -1002,26 +1376,40 @@ scene.onBeforeRenderObservable.add(()=>{
   blinkNext-=dt;
   if(blinkNext<0){ blinkT=.13; blinkNext=rnd(2.5,5.5); }
   if(blinkT>0){ blinkT-=dt; pupils.forEach(p=>p.m.scaling.y=.15); } else pupils.forEach(p=>p.m.scaling.y=1);
+  if(dead){ pupils.forEach(p=>p.m.scaling.y=.12); }
   if(shockT>0){ shockT-=dt; mouthO.isVisible=true;
     brows.forEach(b=>b.m.position.y=b.by+.02); eyes.forEach(e=>e.scaling.set(1.15,1.15,.55));
     if(shockT<=0){ mouthO.isVisible=false; brows.forEach(b=>b.m.position.y=b.by); eyes.forEach(e=>e.scaling.set(1,1,.55)); } }
 
+  /* лагерь: огонь, Билл и сосиска */
   campAnim.fireLight.intensity = 1.0 + Math.sin(time*9.3)*.22 + Math.sin(time*21.7)*.11 + Math.sin(time*3.7)*.15;
   const es = 1 + .08*Math.sin(time*8.2);
   campAnim.ember.scaling.set(es, .55*(1+.12*Math.sin(time*6.3)), es);
   campAnim.chest.scaling.set(1.02*(1+.03*Math.sin(time*1.5+campAnim.phase)), .82, .86);
   campAnim.head.rotation.x = .14 + Math.sin(time*.6+campAnim.phase)*.06;
   campAnim.head.rotation.y = Math.sin(time*.23+campAnim.phase)*.3;
-  campAnim.hands[0].position.x = -(.08 + Math.sin(time*2.7)*.018);
-  campAnim.hands[1].position.x =  (.08 + Math.sin(time*2.7+Math.PI)*.018);
+  campAnim.stick.rotation.x = Math.sin(time*.9+campAnim.phase)*.04;
+  campAnim.stick.rotation.z = Math.sin(time*.6)*.025;
+  /* вертел: вращение вокруг оси прутика (локальная Y узла) */
+  campAnim.grill.rotationQuaternion = campAnim.grill.rotationQuaternion.multiply(BABYLON.Quaternion.RotationAxis(UP, dt*1.4));
+  if(Math.random()<dt*.25) greasePop(campAnim.sw);
   campAnim.bNext-=dt;
   if(campAnim.bNext<0){ campAnim.bT=.12; campAnim.bNext=rnd(2,6); }
   if(campAnim.bT>0){ campAnim.bT-=dt; campAnim.eyes.forEach(e=>e.scaling.y=.12); }
   else campAnim.eyes.forEach(e=>e.scaling.y=1);
 
+  /* viewmodel-револьвер: отдача и покачивание
+     (наклон задаём rotFromTo — гарантированно «дуло вверх» при отдаче) */
+  const gx=Math.sin(time*.8)*.02;
+  const gy=.40*recoilT + Math.sin(time*1.7)*.012;
+  gunRoot.position.set(GUN_BASE.x, GUN_BASE.y+Math.sin(time*1.15)*.006, GUN_BASE.z-.075*recoilT);
+  gunRoot.rotationQuaternion = rotFromTo(FWD, V3(gx, gy, 1).normalize());
+
+  /* tumbleweed */
   const tw=(time*.9)%30; tumble.position.set(-15+tw, .3+Math.abs(Math.sin(time*2.3))*.22, 3.4+Math.sin(time*.4)*1.4);
   tumble.rotation.x-=dt*3.2; tumble.rotation.z-=dt*1.1;
 
+  /* камера */
   if(introT<2){ introT+=dt; camera.radius+=(4.6-camera.radius)*(1-Math.exp(-2*dt)); }
   idleT+=dt;
   if(idleT>8 && !drag) camera.alpha+=dt*.1;
@@ -1029,7 +1417,7 @@ scene.onBeforeRenderObservable.add(()=>{
   if(focusT>0){ focusT-=dt; if(focusPos) camera.setTarget(BABYLON.Vector3.Lerp(camera.target, focusPos, .08));
     if(focusT<=0){ camera.setTarget(V3(0,1.02,0)); focusPos=null; } }
 
-  if(stat.pulls===0 && !drag && !hoverLimb) setHint((time%1.7)<.75); else setHint(false);
+  if(stat.pulls===0 && stat.shots===0 && !drag && !hoverLimb) setHint((time%1.7)<.75); else setHint(false);
 });
 
 engine.runRenderLoop(()=>scene.render());
